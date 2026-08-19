@@ -1,0 +1,28 @@
+name: Build JoystickToMouse
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+
+      - name: Descargar codigo
+        uses: actions/checkout@v4
+
+      - name: Compilar JoystickToMouse
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cl /EHsc /O2 joysticktomouse.cpp /Fe:JoystickToMouse.exe user32.lib winmm.lib
+
+      - name: Guardar EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: JoystickToMouse
+          path: JoystickToMouse.exe
