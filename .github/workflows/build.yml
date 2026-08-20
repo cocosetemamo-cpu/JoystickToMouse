@@ -12,165 +12,108 @@ jobs:
 
     steps:
 
-      # ============================================
-      # DESCARGAR REPOSITORIO
-      # ============================================
-
       - name: Descargar codigo
         uses: actions/checkout@v4
-
-
-      # ============================================
-      # INSTALAR HERRAMIENTAS SVG
-      # ============================================
 
       - name: Instalar ImageMagick
         shell: pwsh
         run: |
           choco install imagemagick -y
 
-
-      # ============================================
-      # EXTRAER SVG DESDE EL CPP
-      # ============================================
-
       - name: Extraer SVG
         shell: pwsh
         run: |
-
-          $cpp = Get-Content joysticktomouse.cpp -Raw
+          $cpp = Get-Content "joysticktomouse.cpp" -Raw
 
           $start = $cpp.IndexOf('R"svg(')
 
           if ($start -lt 0) {
-              Write-Error "No se encontro el SVG."
-              exit 1
+              throw "No se encontro el inicio del SVG."
           }
 
-          $start = $start + 6
+          $start += 6
 
           $end = $cpp.IndexOf(')svg"', $start)
 
           if ($end -lt 0) {
-              Write-Error "No se encontro el final del SVG."
-              exit 1
+              throw "No se encontro el final del SVG."
           }
 
           $svg = $cpp.Substring($start, $end - $start)
 
-          Set-Content -Path JoystickToMouse.svg `
-                      -Value $svg `
-                      -Encoding UTF8
+          [System.IO.File]::WriteAllText(
+              "JoystickToMouse.svg",
+              $svg,
+              [System.Text.UTF8Encoding]::new($false)
+          )
 
           Write-Host "SVG extraido correctamente."
 
-
-      # ============================================
-      # CONVERTIR SVG → ICO
-      # ============================================
-
-      - name: Crear icono ICO
+      - name: Crear ICO
         shell: pwsh
         run: |
+          magick "JoystickToMouse.svg" `
+            -background none `
+            -define icon:auto-resize=256,128,64,48,32,16 `
+            "JoystickToMouse.ico"
 
-          magick JoystickToMouse.svg `
-                 -background none `
-                 -define icon:auto-resize=256,128,64,48,32,16 `
-                 JoystickToMouse.ico
-
-          if (-not (Test-Path JoystickToMouse.ico)) {
-              Write-Error "No se pudo crear el ICO."
-              exit 1
+          if (!(Test-Path "JoystickToMouse.ico")) {
+              throw "No se pudo crear JoystickToMouse.ico"
           }
 
-          Write-Host "Icono creado correctamente."
+          Write-Host "ICO creado correctamente."
 
-
-      # ============================================
-      # ENCONTRAR VISUAL STUDIO
-      # ============================================
-
-      - name: Configurar MSVC
+      - name: Encontrar Visual Studio
         shell: pwsh
         run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 
-          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+          $vsPath = & $vswhere `
             -latest `
             -products * `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
             -property installationPath
 
-          if (-not $vsPath) {
-              Write-Error "No se encontro Visual Studio con herramientas C++."
-              exit 1
+          if (!$vsPath) {
+              throw "No se encontro Visual Studio con C++."
           }
 
-          Write-Host "Visual Studio:"
+          Write-Host "Visual Studio encontrado:"
           Write-Host $vsPath
 
-          $vcvars = Join-Path `
-            $vsPath `
-            "VC\Auxiliary\Build\vcvars64.bat"
+          "VS_PATH=$vsPath" >> $env:GITHUB_ENV
 
-          if (-not (Test-Path $vcvars)) {
-              Write-Error "No se encontro vcvars64.bat."
-              exit 1
-          }
-
-          cmd /c "`"$vcvars`" && set" | ForEach-Object {
-
-              if ($_ -match '^([^=]+)=(.*)$') {
-
-                  "$($matches[1])=$($matches[2])" `
-                      >> $env:GITHUB_ENV
-              }
-          }
-
-
-      # ============================================
-      # COMPILAR RECURSO
-      # ============================================
-
-      - name: Compilar icono
+      - name: Configurar compilador
         shell: cmd
         run: |
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
 
+          echo PATH=%PATH%>>"%GITHUB_ENV%"
+          echo INCLUDE=%INCLUDE%>>"%GITHUB_ENV%"
+          echo LIB=%LIB%>>"%GITHUB_ENV%"
+
+      - name: Compilar recurso
+        shell: cmd
+        run: |
           rc.exe resource.rc
 
           if errorlevel 1 (
-              echo Error compilando resource.rc
-              exit /b 1
+            echo ERROR: No se pudo compilar resource.rc
+            exit /b 1
           )
-
-
-      # ============================================
-      # COMPILAR PROGRAMA
-      # ============================================
 
       - name: Compilar JoystickToMouse
         shell: cmd
         run: |
-
-          cl /EHsc /O2 `
-             joysticktomouse.cpp `
-             resource.res `
-             /Fe:JoystickToMouse.exe `
-             user32.lib `
-             winmm.lib
+          cl.exe /EHsc /O2 joysticktomouse.cpp resource.res /Fe:JoystickToMouse.exe user32.lib winmm.lib
 
           if errorlevel 1 (
-              echo Error compilando JoystickToMouse
-              exit /b 1
+            echo ERROR: No se pudo compilar JoystickToMouse
+            exit /b 1
           )
-
-
-      # ============================================
-      # SUBIR EXE
-      # ============================================
 
       - name: Guardar EXE
         uses: actions/upload-artifact@v4
-
         with:
           name: JoystickToMouse
           path: JoystickToMouse.exe
